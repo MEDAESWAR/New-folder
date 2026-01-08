@@ -1,0 +1,6 @@
+﻿DIRECT_DATABASE_URL="postgresql://postgres:Meshwar220%40@db.nwyjgdhmtsylbxnmmkir.supabase.co:5432/postgres?sslmode=require"
+
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+JWT_EXPIRES_IN=7d
+OPENAI_API_KEY=AIzaSyA9GvFDEZNoxmr36IeMijeK5WUFAOuWiIo
+NODE_ENV=development
