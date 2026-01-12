@@ -1,20 +1,50 @@
-import OpenAI from 'openai';
 
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('WARNING: OPENAI_API_KEY is not set. AI features will not work.');
+const HF_API_URL = process.env.HF_API_URL;
+const HF_MODEL_NAME = process.env.HF_MODEL_NAME;
+
+if (!HF_API_URL || !HF_MODEL_NAME) {
+  console.warn('WARNING: HF_API_URL or HF_MODEL_NAME is not set. AI features will not work.');
 }
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
-  : null;
+interface HfMessage {
+  role: string;
+  content: string;
+}
 
-const ensureOpenAI = () => {
-  if (!openai) {
-    throw new Error('OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.');
+const callHuggingFace = async (messages: HfMessage[]) => {
+  if (!HF_API_URL || !HF_MODEL_NAME) {
+    throw new Error('Hugging Face API not configured. Please set HF_API_URL and HF_MODEL_NAME in your .env file.');
   }
-  return openai;
+
+  try {
+    const response = await fetch(HF_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: HF_MODEL_NAME,
+        messages,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('HF API Error Details:', errorText);
+      throw new Error(`HF API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('HF API Response:', JSON.stringify(data, null, 2)); // Debug log
+
+    // Handle both OpenAI standard format and the custom model format observed
+    const content = data.choices?.[0]?.message?.content || data.message?.content || '';
+    return content.trim();
+  } catch (error) {
+    console.error('Error calling Hugging Face API:', error);
+    throw error;
+  }
 };
 
 // Resume improvement prompts
@@ -22,8 +52,6 @@ export const improveResumeBullet = async (
   bulletPoint: string,
   context?: string
 ): Promise<string> => {
-  const client = ensureOpenAI();
-
   const prompt = `You are a professional resume writer. Rewrite the following bullet point to be more impactful, professional, and ATS-friendly. Use action verbs and quantify achievements where possible.
 
 Original bullet point: "${bulletPoint}"
@@ -31,21 +59,13 @@ ${context ? `Context: ${context}` : ''}
 
 Return only the improved bullet point, nothing else.`;
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an expert resume writer specializing in ATS optimization and professional writing.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.7,
-    max_tokens: 200,
-  });
-
-  return response.choices[0].message.content?.trim() || bulletPoint;
+  return callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are an expert resume writer specializing in ATS optimization and professional writing.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 };
 
 export const optimizeResumeForJob = async (
@@ -56,8 +76,6 @@ export const optimizeResumeForJob = async (
   suggestions: string[];
   keywords: string[];
 }> => {
-  const client = ensureOpenAI();
-
   const prompt = `Analyze this resume and job description. Provide:
 1. An optimized version of the resume summary and key sections
 2. Specific suggestions for improvement
@@ -69,31 +87,32 @@ ${resumeContent}
 Job Description:
 ${jobDescription}
 
-Return a JSON object with:
-- optimizedContent: string
-- suggestions: string[]
-- keywords: string[]`;
+Return a STRICT JSON object with these exact keys:
+- "optimizedContent": string
+- "suggestions": string array
+- "keywords": string array
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an ATS optimization expert. Return only valid JSON.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.5,
-    response_format: { type: 'json_object' },
-  });
+Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON string.`;
 
-  const result = JSON.parse(response.choices[0].message.content || '{}');
-  return {
-    optimizedContent: result.optimizedContent || resumeContent,
-    suggestions: result.suggestions || [],
-    keywords: result.keywords || [],
-  };
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are an ATS optimization expert. You must return only valid JSON.',
+    },
+    { role: 'user', content: prompt },
+  ]);
+
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanResponse);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return {
+      optimizedContent: resumeContent,
+      suggestions: ['AI response parsing failed'],
+      keywords: [],
+    };
+  }
 };
 
 // Job description analysis
@@ -105,32 +124,38 @@ export const analyzeJobDescription = async (
   experienceLevel: string;
   responsibilities: string[];
 }> => {
-  const client = ensureOpenAI();
-
   const prompt = `Extract key information from this job description:
 
 ${jobDescription}
 
-Return a JSON object with:
-- requiredSkills: array of technical and soft skills
-- keywords: important keywords for ATS matching
-- experienceLevel: "Entry", "Mid", "Senior", or "Executive"
-- responsibilities: array of main responsibilities`;
+Return a STRICT JSON object with these exact keys:
+- "requiredSkills": array of technical and soft skills
+- "keywords": important keywords for ATS matching
+- "experienceLevel": "Entry", "Mid", "Senior", or "Executive"
+- "responsibilities": array of main responsibilities
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a job market analyst. Return only valid JSON.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.3,
-    response_format: { type: 'json_object' },
-  });
+Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON string.`;
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are a job market analyst. You must return only valid JSON.',
+    },
+    { role: 'user', content: prompt },
+  ]);
+
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanResponse);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return {
+      requiredSkills: [],
+      keywords: [],
+      experienceLevel: 'Unknown',
+      responsibilities: [],
+    };
+  }
 };
 
 // Cover letter generation
@@ -140,8 +165,6 @@ export const generateCoverLetter = async (
   companyName: string,
   jobTitle: string
 ): Promise<string> => {
-  const client = ensureOpenAI();
-
   const prompt = `Generate a professional, personalized cover letter for this position:
 
 Job Title: ${jobTitle}
@@ -162,21 +185,13 @@ Write a compelling cover letter that:
 
 Return only the cover letter text, no additional formatting.`;
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are a professional cover letter writer. Write compelling, personalized cover letters.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.8,
-    max_tokens: 800,
-  });
-
-  return response.choices[0].message.content || '';
+  return callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are a professional cover letter writer. Write compelling, personalized cover letters.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 };
 
 // Career guidance chat
@@ -190,8 +205,6 @@ export const getCareerGuidance = async (
   },
   conversationHistory: Array<{ role: string; content: string }> = []
 ): Promise<string> => {
-  const client = ensureOpenAI();
-
   const systemPrompt = `You are a professional career coach and mentor. You help people with:
 - Career advice and guidance
 - Job role suitability assessment
@@ -207,20 +220,13 @@ User Context:
 
 Provide helpful, actionable, and encouraging advice. Be professional but friendly.`;
 
-  const messages = [
+  const messages: HfMessage[] = [
     { role: 'system', content: systemPrompt },
     ...conversationHistory,
     { role: 'user', content: userMessage },
   ];
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: messages as any,
-    temperature: 0.7,
-    max_tokens: 500,
-  });
-
-  return response.choices[0].message.content || '';
+  return callHuggingFace(messages);
 };
 
 // Skill gap analysis
@@ -240,28 +246,32 @@ ${jobDescription ? `Job Description: ${jobDescription}` : ''}
 
 Current Skills: ${currentSkills.join(', ')}
 
-Return a JSON object with:
-- missingSkills: array of {skill, priority: "High"/"Medium"/"Low", reason}
-- weakAreas: array of {skill, currentLevel, targetLevel}
-- recommendations: array of actionable learning recommendations`;
+Return a STRICT JSON object with these exact keys:
+- "missingSkills": array of objects with keys "skill", "priority" ("High"/"Medium"/"Low"), "reason"
+- "weakAreas": array of objects with keys "skill", "currentLevel", "targetLevel"
+- "recommendations": array of actionable learning recommendations
 
-  const client = ensureOpenAI();
+Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON string.`;
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are a career development expert specializing in skill gap analysis. Return only valid JSON.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.5,
-    response_format: { type: 'json_object' },
-  });
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are a career development expert specializing in skill gap analysis. You must return only valid JSON.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanResponse);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return {
+      missingSkills: [],
+      weakAreas: [],
+      recommendations: [],
+    };
+  }
 };
 
 // Career path planning
@@ -287,27 +297,30 @@ Target Role: ${targetRole}
 Timeline: ${timeline}
 Current Skills: ${currentSkills.join(', ')}
 
-Return a JSON object with:
-- milestones: array of {title, description, timeline, skills, resources}
-- roadmap: a comprehensive text description of the path`;
+Return a STRICT JSON object with these exact keys:
+- "milestones": array of objects with keys "title", "description", "timeline", "skills" (array), "resources" (array)
+- "roadmap": a comprehensive text description of the path
 
-  const client = ensureOpenAI();
+Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON string.`;
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are a career planning expert. Create actionable, realistic career paths. Return only valid JSON.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.6,
-    response_format: { type: 'json_object' },
-  });
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are a career planning expert. Create actionable, realistic career paths. You must return only valid JSON.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanResponse);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return {
+      milestones: [],
+      roadmap: 'Failed to generate roadmap due to AI parsing error.',
+    };
+  }
 };
 
 // Interview question generation
@@ -329,26 +342,26 @@ Include a mix of:
 - Behavioral questions
 - Role-specific questions
 
-Return a JSON array of question strings.`;
+Return a STRICT JSON array of question strings in this format: ["Question 1", "Question 2", ...].
+Do NOT return an object. Just the array.
+Do NOT include any markdown formatting.`;
 
-  const client = ensureOpenAI();
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are an interview preparation expert. return only a JSON array of questions.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an interview preparation expert. Return only a JSON array of questions.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.7,
-    response_format: { type: 'json_object' },
-  });
-
-  const result = JSON.parse(response.choices[0].message.content || '{}');
-  return result.questions || result || [];
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    const result = JSON.parse(cleanResponse);
+    return Array.isArray(result) ? result : (result.questions || []);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return [];
+  }
 };
 
 // Interview answer feedback
@@ -368,27 +381,32 @@ Question: ${question}
 Answer: ${answer}
 Job Description: ${jobDescription}
 
-Return a JSON object with:
-- score: number 0-100
-- strengths: array of what was good
-- improvements: array of specific suggestions
-- suggestedAnswer: an improved version of the answer`;
+Return a STRICT JSON object with these exact keys:
+- "score": number 0-100
+- "strengths": array of what was good
+- "improvements": array of specific suggestions
+- "suggestedAnswer": an improved version of the answer
 
-  const client = ensureOpenAI();
+Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON string.`;
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an interview coach providing constructive feedback. Return only valid JSON.',
-      },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.5,
-    response_format: { type: 'json_object' },
-  });
+  const response = await callHuggingFace([
+    {
+      role: 'system',
+      content: 'You are an interview coach providing constructive feedback. You must return only valid JSON.',
+    },
+    { role: 'user', content: prompt },
+  ]);
 
-  return JSON.parse(response.choices[0].message.content || '{}');
+  try {
+    const cleanResponse = response.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanResponse);
+  } catch (e) {
+    console.error('Failed to parse JSON from AI response:', response);
+    return {
+      score: 0,
+      strengths: [],
+      improvements: ['AI response parsing failed'],
+      suggestedAnswer: '',
+    };
+  }
 };
