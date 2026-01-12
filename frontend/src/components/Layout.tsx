@@ -28,6 +28,7 @@ const Layout = () => {
                   Career Mentor
                 </h1>
               </div>
+
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 {navigation.map((item) => (
                   <Link
@@ -44,8 +45,12 @@ const Layout = () => {
                 ))}
               </div>
             </div>
+
             <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">{user?.name || user?.email}</span>
+              <span className="text-sm text-gray-700 mr-4">
+                {user?.email}
+              </span>
+
               <button
                 onClick={logout}
                 className="text-sm text-gray-500 hover:text-gray-700"
