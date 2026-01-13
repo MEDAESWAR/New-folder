@@ -29,6 +29,9 @@ app.use('/api/interviews', interviewRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Career Mentor API is running' });
 });
+app.get('/', (req, res) => {
+  res.json('Get request got');
+});
 
 // Error handling
 app.use(errorHandler);
