@@ -6,13 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  // Read the connection string from the DATABASE_URL environment variable
-  url      = env("DIRECT_DATABASE_URL")
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id          String   @id @default(uuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   email       String   @unique
   password    String
   name        String?
@@ -31,8 +30,8 @@ model User {
 }
 
 model Resume {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   title       String
   summary     String?
   experience  Json     // Array of experience objects
@@ -49,8 +48,8 @@ model Resume {
 }
 
 model Skill {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   name        String
   category    String   // e.g., "Technical", "Soft", "Language"
   proficiency String   // "Beginner", "Intermediate", "Advanced", "Expert"
@@ -63,8 +62,8 @@ model Skill {
 }
 
 model CareerGoal {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   targetRole  String
   industry    String?
   timeline    String   // "Short-term", "Long-term"
@@ -79,8 +78,8 @@ model CareerGoal {
 }
 
 model JobDescription {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   title       String
   company     String?
   description String
@@ -95,8 +94,8 @@ model JobDescription {
 }
 
 model AIChat {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   role        String   // "user" or "assistant"
   content     String
   sessionId   String?  // For grouping conversations
@@ -108,8 +107,8 @@ model AIChat {
 }
 
 model InterviewSession {
-  id          String   @id @default(uuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   jobTitle    String
   company     String?
   questions   Json     // Array of question-answer pairs
