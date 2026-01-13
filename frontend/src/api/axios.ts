@@ -2,7 +2,7 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -30,7 +30,7 @@ api.interceptors.response.use(
     if (error.code === 'ECONNREFUSED' || error.message?.includes('Network Error') || !error.response) {
       error.isConnectionError = true;
     }
-    
+
     if (error.response?.status === 401) {
       // Only logout if we're not on the login/register page
       if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
