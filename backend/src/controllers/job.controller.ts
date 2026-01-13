@@ -1,13 +1,12 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import JobDescription from '../models/jobDescription.model';
+import Resume from '../models/resume.model';
 import { z } from 'zod';
 import {
   analyzeJobDescription,
   generateCoverLetter,
 } from '../services/ai.service';
-
-const prisma = new PrismaClient();
 
 const jobDescriptionSchema = z.object({
   title: z.string().min(1),
@@ -26,17 +25,15 @@ export const analyzeJob = async (req: AuthRequest, res: Response) => {
     const analysis = await analyzeJobDescription(description);
 
     // Save to database
-    const saved = await prisma.jobDescription.create({
-      data: {
-        userId: req.userId!,
-        title: req.body.title || 'Untitled Job',
-        company: req.body.company || null,
-        description,
-        extractedData: analysis,
-      },
+    const saved = await JobDescription.create({
+      userId: req.userId,
+      title: req.body.title || 'Untitled Job',
+      company: req.body.company || undefined,
+      description,
+      extractedData: analysis,
     });
 
-    res.json({ ...analysis, id: saved.id });
+    res.json({ ...analysis, id: saved._id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -44,10 +41,7 @@ export const analyzeJob = async (req: AuthRequest, res: Response) => {
 
 export const getJobDescriptions = async (req: AuthRequest, res: Response) => {
   try {
-    const jobs = await prisma.jobDescription.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    });
+    const jobs = await JobDescription.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.json(jobs);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -56,11 +50,9 @@ export const getJobDescriptions = async (req: AuthRequest, res: Response) => {
 
 export const getJobDescription = async (req: AuthRequest, res: Response) => {
   try {
-    const job = await prisma.jobDescription.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const job = await JobDescription.findOne({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!job) {
@@ -86,18 +78,14 @@ export const compareResumeWithJob = async (
         .json({ error: 'resumeId and jobDescriptionId are required' });
     }
 
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: resumeId,
-        userId: req.userId!,
-      },
+    const resume = await Resume.findOne({
+      _id: resumeId,
+      userId: req.userId,
     });
 
-    const job = await prisma.jobDescription.findFirst({
-      where: {
-        id: jobDescriptionId,
-        userId: req.userId!,
-      },
+    const job = await JobDescription.findOne({
+      _id: jobDescriptionId,
+      userId: req.userId,
     });
 
     if (!resume || !job) {
@@ -112,7 +100,7 @@ export const compareResumeWithJob = async (
     const matchingSkills = resumeSkills.filter((skill) =>
       jobSkills.some(
         (js) => js.toLowerCase().includes(skill.toLowerCase()) ||
-        skill.toLowerCase().includes(js.toLowerCase())
+          skill.toLowerCase().includes(js.toLowerCase())
       )
     );
 
@@ -121,10 +109,7 @@ export const compareResumeWithJob = async (
       : 0;
 
     // Update match score
-    await prisma.jobDescription.update({
-      where: { id: jobDescriptionId },
-      data: { matchScore },
-    });
+    await JobDescription.findByIdAndUpdate(jobDescriptionId, { matchScore });
 
     res.json({
       matchScore: Math.round(matchScore),
@@ -153,18 +138,14 @@ export const createCoverLetter = async (req: AuthRequest, res: Response) => {
         .json({ error: 'resumeId and jobDescriptionId are required' });
     }
 
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: resumeId,
-        userId: req.userId!,
-      },
+    const resume = await Resume.findOne({
+      _id: resumeId,
+      userId: req.userId,
     });
 
-    const job = await prisma.jobDescription.findFirst({
-      where: {
-        id: jobDescriptionId,
-        userId: req.userId!,
-      },
+    const job = await JobDescription.findOne({
+      _id: jobDescriptionId,
+      userId: req.userId,
     });
 
     if (!resume || !job) {

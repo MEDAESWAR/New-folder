@@ -1,13 +1,11 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import Resume from '../models/resume.model';
 import { z } from 'zod';
 import {
   improveResumeBullet,
   optimizeResumeForJob,
 } from '../services/ai.service';
-
-const prisma = new PrismaClient();
 
 const resumeSchema = z.object({
   title: z.string().min(1),
@@ -22,11 +20,9 @@ const resumeSchema = z.object({
 export const createResume = async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = resumeSchema.parse(req.body);
-    const resume = await prisma.resume.create({
-      data: {
-        userId: req.userId!,
-        ...validatedData,
-      },
+    const resume = await Resume.create({
+      userId: req.userId,
+      ...validatedData,
     });
     res.status(201).json(resume);
   } catch (error: any) {
@@ -39,10 +35,7 @@ export const createResume = async (req: AuthRequest, res: Response) => {
 
 export const getResumes = async (req: AuthRequest, res: Response) => {
   try {
-    const resumes = await prisma.resume.findMany({
-      where: { userId: req.userId! },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const resumes = await Resume.find({ userId: req.userId }).sort({ updatedAt: -1 });
     res.json(resumes);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -51,11 +44,9 @@ export const getResumes = async (req: AuthRequest, res: Response) => {
 
 export const getResume = async (req: AuthRequest, res: Response) => {
   try {
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const resume = await Resume.findOne({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!resume) {
@@ -72,23 +63,20 @@ export const updateResume = async (req: AuthRequest, res: Response) => {
   try {
     const validatedData = resumeSchema.partial().parse(req.body);
 
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
+    const resume = await Resume.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.userId,
       },
-    });
+      { $set: validatedData },
+      { new: true }
+    );
 
     if (!resume) {
       return res.status(404).json({ error: 'Resume not found' });
     }
 
-    const updated = await prisma.resume.update({
-      where: { id: req.params.id },
-      data: validatedData,
-    });
-
-    res.json(updated);
+    res.json(resume);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
@@ -99,20 +87,14 @@ export const updateResume = async (req: AuthRequest, res: Response) => {
 
 export const deleteResume = async (req: AuthRequest, res: Response) => {
   try {
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const resume = await Resume.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!resume) {
       return res.status(404).json({ error: 'Resume not found' });
     }
-
-    await prisma.resume.delete({
-      where: { id: req.params.id },
-    });
 
     res.json({ message: 'Resume deleted successfully' });
   } catch (error: any) {
@@ -145,11 +127,9 @@ export const optimizeForJob = async (req: AuthRequest, res: Response) => {
         .json({ error: 'resumeId and jobDescription are required' });
     }
 
-    const resume = await prisma.resume.findFirst({
-      where: {
-        id: resumeId,
-        userId: req.userId!,
-      },
+    const resume = await Resume.findOne({
+      _id: resumeId,
+      userId: req.userId!,
     });
 
     if (!resume) {

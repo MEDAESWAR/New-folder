@@ -1,6 +1,7 @@
+import 'dotenv/config'; // Must be first!
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import connectDB from './config/db';
 import authRoutes from './routes/auth.routes';
 import resumeRoutes from './routes/resume.routes';
 import jobRoutes from './routes/job.routes';
@@ -8,7 +9,8 @@ import careerRoutes from './routes/career.routes';
 import interviewRoutes from './routes/interview.routes';
 import { errorHandler } from './middleware/errorHandler';
 
-dotenv.config();
+// Connect to Database
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -38,5 +40,5 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log("DATABASE MIGRATION: MONGODB ACTIVE");
 });
+

@@ -1,12 +1,11 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import InterviewSession from '../models/interviewSession.model';
+import Resume from '../models/resume.model';
 import {
   generateInterviewQuestions,
   provideInterviewFeedback,
 } from '../services/ai.service';
-
-const prisma = new PrismaClient();
 
 export const createInterviewSession = async (
   req: AuthRequest,
@@ -20,10 +19,7 @@ export const createInterviewSession = async (
     }
 
     // Get user's latest resume for context
-    const resume = await prisma.resume.findFirst({
-      where: { userId: req.userId! },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const resume = await Resume.findOne({ userId: req.userId }).sort({ updatedAt: -1 });
 
     const questions = await generateInterviewQuestions(
       jobTitle,
@@ -31,13 +27,11 @@ export const createInterviewSession = async (
       resume || {}
     );
 
-    const session = await prisma.interviewSession.create({
-      data: {
-        userId: req.userId!,
-        jobTitle,
-        company: company || null,
-        questions: questions.map((q) => ({ question: q, answer: '' })),
-      },
+    const session = await InterviewSession.create({
+      userId: req.userId,
+      jobTitle,
+      company: company || undefined,
+      questions: questions.map((q) => ({ question: q, answer: '' })),
     });
 
     res.status(201).json(session);
@@ -51,10 +45,7 @@ export const getInterviewSessions = async (
   res: Response
 ) => {
   try {
-    const sessions = await prisma.interviewSession.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    });
+    const sessions = await InterviewSession.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.json(sessions);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -63,11 +54,9 @@ export const getInterviewSessions = async (
 
 export const getInterviewSession = async (req: AuthRequest, res: Response) => {
   try {
-    const session = await prisma.interviewSession.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const session = await InterviewSession.findOne({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!session) {
@@ -90,11 +79,9 @@ export const submitAnswer = async (req: AuthRequest, res: Response) => {
         .json({ error: 'questionIndex and answer are required' });
     }
 
-    const session = await prisma.interviewSession.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const session = await InterviewSession.findOne({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!session) {
@@ -117,20 +104,27 @@ export const submitAnswer = async (req: AuthRequest, res: Response) => {
       jobDescription || ''
     );
 
-    // Update question with answer and feedback
+    // Update question with answer
     questions[questionIndex].answer = answer;
 
-    // Update session
-    const updated = await prisma.interviewSession.update({
-      where: { id: req.params.id },
-      data: {
-        questions,
-        feedback: {
-          ...((session.feedback as any) || {}),
-          [questionIndex]: feedback,
-        },
+    // Update session with new questions array and feedback
+    // Note: Mongoose needs explicit markModified for mixed types or deeper updates sometimes,
+    // but findOneAndUpdate with entire object work.
+    // However, updating nested feedback object is trickier.
+    // We will use $set.
+
+    const currentFeedback = (session.feedback as any) || {};
+
+    const updated = await InterviewSession.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          questions: questions,
+          [`feedback.${questionIndex}`]: feedback
+        }
       },
-    });
+      { new: true }
+    );
 
     res.json({ session: updated, feedback });
   } catch (error: any) {
@@ -140,11 +134,9 @@ export const submitAnswer = async (req: AuthRequest, res: Response) => {
 
 export const completeInterview = async (req: AuthRequest, res: Response) => {
   try {
-    const session = await prisma.interviewSession.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const session = await InterviewSession.findOne({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!session) {
@@ -159,13 +151,14 @@ export const completeInterview = async (req: AuthRequest, res: Response) => {
     const averageScore =
       feedbackScores.length > 0
         ? feedbackScores.reduce((a: number, b: number) => a + b, 0) /
-          feedbackScores.length
+        feedbackScores.length
         : 0;
 
-    const updated = await prisma.interviewSession.update({
-      where: { id: req.params.id },
-      data: { score: averageScore },
-    });
+    const updated = await InterviewSession.findByIdAndUpdate(
+      req.params.id,
+      { score: averageScore },
+      { new: true }
+    );
 
     res.json(updated);
   } catch (error: any) {

@@ -1,14 +1,15 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { PrismaClient } from '@prisma/client';
+import Resume from '../models/resume.model';
+import Skill from '../models/skill.model';
+import CareerGoal from '../models/careerGoal.model';
+import AIChat from '../models/aiChat.model';
 import { z } from 'zod';
 import {
   getCareerGuidance,
   analyzeSkillGaps,
   generateCareerPath,
 } from '../services/ai.service';
-
-const prisma = new PrismaClient();
 
 export const chatWithCareerAgent = async (req: AuthRequest, res: Response) => {
   try {
@@ -20,27 +21,19 @@ export const chatWithCareerAgent = async (req: AuthRequest, res: Response) => {
 
     // Get user context
     const [resumes, skills, goals] = await Promise.all([
-      prisma.resume.findMany({
-        where: { userId: req.userId! },
-        take: 1,
-        orderBy: { updatedAt: 'desc' },
-      }),
-      prisma.skill.findMany({
-        where: { userId: req.userId! },
-      }),
-      prisma.careerGoal.findMany({
-        where: { userId: req.userId!, status: 'active' },
-      }),
+      Resume.find({ userId: req.userId }).sort({ updatedAt: -1 }).limit(1),
+      Skill.find({ userId: req.userId }),
+      CareerGoal.find({ userId: req.userId, status: 'active' }),
     ]);
 
     const userContext = {
       experience: resumes[0]?.experience || [],
       education: resumes[0]?.education || [],
-      skills: skills.map((s) => ({
+      skills: skills.map((s: any) => ({
         name: s.name,
         proficiency: s.proficiency,
       })),
-      goals: goals.map((g) => ({
+      goals: goals.map((g: any) => ({
         targetRole: g.targetRole,
         timeline: g.timeline,
       })),
@@ -49,15 +42,13 @@ export const chatWithCareerAgent = async (req: AuthRequest, res: Response) => {
     // Get conversation history if sessionId provided
     let conversationHistory: Array<{ role: string; content: string }> = [];
     if (sessionId) {
-      const history = await prisma.aIChat.findMany({
-        where: {
-          userId: req.userId!,
-          sessionId,
-        },
-        orderBy: { createdAt: 'asc' },
-        take: 10,
-      });
-      conversationHistory = history.map((h) => ({
+      const history = await AIChat.find({
+        userId: req.userId,
+        sessionId,
+      })
+        .sort({ createdAt: 1 })
+        .limit(10);
+      conversationHistory = history.map((h: any) => ({
         role: h.role,
         content: h.content,
       }));
@@ -73,21 +64,17 @@ export const chatWithCareerAgent = async (req: AuthRequest, res: Response) => {
     // Save conversation
     const finalSessionId = sessionId || `session_${Date.now()}`;
     await Promise.all([
-      prisma.aIChat.create({
-        data: {
-          userId: req.userId!,
-          role: 'user',
-          content: message,
-          sessionId: finalSessionId,
-        },
+      AIChat.create({
+        userId: req.userId,
+        role: 'user',
+        content: message,
+        sessionId: finalSessionId,
       }),
-      prisma.aIChat.create({
-        data: {
-          userId: req.userId!,
-          role: 'assistant',
-          content: response,
-          sessionId: finalSessionId,
-        },
+      AIChat.create({
+        userId: req.userId,
+        role: 'assistant',
+        content: response,
+        sessionId: finalSessionId,
       }),
     ]);
 
@@ -101,13 +88,10 @@ export const getChatHistory = async (req: AuthRequest, res: Response) => {
   try {
     const { sessionId } = req.query;
 
-    const chats = await prisma.aIChat.findMany({
-      where: {
-        userId: req.userId!,
-        ...(sessionId ? { sessionId: sessionId as string } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    const chats = await AIChat.find({
+      userId: req.userId,
+      ...(sessionId ? { sessionId: sessionId as string } : {}),
+    }).sort({ createdAt: 1 });
 
     res.json(chats);
   } catch (error: any) {
@@ -124,11 +108,9 @@ export const analyzeSkillGap = async (req: AuthRequest, res: Response) => {
     }
 
     // Get user skills
-    const skills = await prisma.skill.findMany({
-      where: { userId: req.userId! },
-    });
+    const skills = await Skill.find({ userId: req.userId });
 
-    const currentSkills = skills.map((s) => s.name);
+    const currentSkills = skills.map((s: any) => s.name);
 
     const analysis = await analyzeSkillGaps(
       currentSkills,
@@ -153,11 +135,9 @@ export const createCareerPath = async (req: AuthRequest, res: Response) => {
     }
 
     // Get user skills
-    const skills = await prisma.skill.findMany({
-      where: { userId: req.userId! },
-    });
+    const skills = await Skill.find({ userId: req.userId });
 
-    const currentSkills = skills.map((s) => s.name);
+    const currentSkills = skills.map((s: any) => s.name);
 
     const path = await generateCareerPath(
       currentRole,
@@ -174,10 +154,7 @@ export const createCareerPath = async (req: AuthRequest, res: Response) => {
 
 export const getSkills = async (req: AuthRequest, res: Response) => {
   try {
-    const skills = await prisma.skill.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    });
+    const skills = await Skill.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.json(skills);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -194,11 +171,9 @@ export const createSkill = async (req: AuthRequest, res: Response) => {
 
     const validatedData = schema.parse(req.body);
 
-    const skill = await prisma.skill.create({
-      data: {
-        userId: req.userId!,
-        ...validatedData,
-      },
+    const skill = await Skill.create({
+      userId: req.userId,
+      ...validatedData,
     });
 
     res.status(201).json(skill);
@@ -222,23 +197,20 @@ export const updateSkill = async (req: AuthRequest, res: Response) => {
 
     const validatedData = schema.parse(req.body);
 
-    const skill = await prisma.skill.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
+    const skill = await Skill.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.userId,
       },
-    });
+      { $set: validatedData },
+      { new: true }
+    );
 
     if (!skill) {
       return res.status(404).json({ error: 'Skill not found' });
     }
 
-    const updated = await prisma.skill.update({
-      where: { id: req.params.id },
-      data: validatedData,
-    });
-
-    res.json(updated);
+    res.json(skill);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
@@ -249,20 +221,14 @@ export const updateSkill = async (req: AuthRequest, res: Response) => {
 
 export const deleteSkill = async (req: AuthRequest, res: Response) => {
   try {
-    const skill = await prisma.skill.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const skill = await Skill.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!skill) {
       return res.status(404).json({ error: 'Skill not found' });
     }
-
-    await prisma.skill.delete({
-      where: { id: req.params.id },
-    });
 
     res.json({ message: 'Skill deleted successfully' });
   } catch (error: any) {
@@ -272,10 +238,7 @@ export const deleteSkill = async (req: AuthRequest, res: Response) => {
 
 export const getCareerGoals = async (req: AuthRequest, res: Response) => {
   try {
-    const goals = await prisma.careerGoal.findMany({
-      where: { userId: req.userId! },
-      orderBy: { createdAt: 'desc' },
-    });
+    const goals = await CareerGoal.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.json(goals);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -293,11 +256,9 @@ export const createCareerGoal = async (req: AuthRequest, res: Response) => {
 
     const validatedData = schema.parse(req.body);
 
-    const goal = await prisma.careerGoal.create({
-      data: {
-        userId: req.userId!,
-        ...validatedData,
-      },
+    const goal = await CareerGoal.create({
+      userId: req.userId,
+      ...validatedData,
     });
 
     res.status(201).json(goal);
@@ -321,23 +282,20 @@ export const updateCareerGoal = async (req: AuthRequest, res: Response) => {
 
     const validatedData = schema.parse(req.body);
 
-    const goal = await prisma.careerGoal.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
+    const goal = await CareerGoal.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.userId,
       },
-    });
+      { $set: validatedData },
+      { new: true }
+    );
 
     if (!goal) {
       return res.status(404).json({ error: 'Career goal not found' });
     }
 
-    const updated = await prisma.careerGoal.update({
-      where: { id: req.params.id },
-      data: validatedData,
-    });
-
-    res.json(updated);
+    res.json(goal);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
@@ -348,20 +306,14 @@ export const updateCareerGoal = async (req: AuthRequest, res: Response) => {
 
 export const deleteCareerGoal = async (req: AuthRequest, res: Response) => {
   try {
-    const goal = await prisma.careerGoal.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.userId!,
-      },
+    const goal = await CareerGoal.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.userId,
     });
 
     if (!goal) {
       return res.status(404).json({ error: 'Career goal not found' });
     }
-
-    await prisma.careerGoal.delete({
-      where: { id: req.params.id },
-    });
 
     res.json({ message: 'Career goal deleted successfully' });
   } catch (error: any) {
