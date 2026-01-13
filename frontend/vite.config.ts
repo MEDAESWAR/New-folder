@@ -14,7 +14,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'https://resume-builder-backend-a5zs.onrender.com/api',
+        target: 'https://resume-builder-backend-a5zs.onrender.com/',
         changeOrigin: true,
       },
     },
