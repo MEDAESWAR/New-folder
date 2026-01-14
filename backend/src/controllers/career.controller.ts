@@ -63,20 +63,19 @@ export const chatWithCareerAgent = async (req: AuthRequest, res: Response) => {
 
     // Save conversation
     const finalSessionId = sessionId || `session_${Date.now()}`;
-    await Promise.all([
-      AIChat.create({
-        userId: req.userId,
-        role: 'user',
-        content: message,
-        sessionId: finalSessionId,
-      }),
-      AIChat.create({
-        userId: req.userId,
-        role: 'assistant',
-        content: response,
-        sessionId: finalSessionId,
-      }),
-    ]);
+    await AIChat.create({
+      userId: req.userId,
+      role: 'user',
+      content: message,
+      sessionId: finalSessionId,
+    });
+
+    await AIChat.create({
+      userId: req.userId,
+      role: 'assistant',
+      content: response,
+      sessionId: finalSessionId,
+    });
 
     res.json({ response, sessionId: finalSessionId });
   } catch (error: any) {
